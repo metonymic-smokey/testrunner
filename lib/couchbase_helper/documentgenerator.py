@@ -608,7 +608,10 @@ class GeoSpatialDataLoader(KVGenerator):
             self.end = int(kwargs['end'])
 
         if op_type == "create":
-            self.read_from_dump()
+            if self.name == "earthquake":
+                self.read_from_dump()
+            elif self.name == "geojson":
+                self.custom_read_from_dump(kwargs['filename'])
         elif op_type == "delete":
             # for deletes, just keep/return empty docs with just type field
             for count in range(self.start, self.end):
@@ -638,6 +641,29 @@ class GeoSpatialDataLoader(KVGenerator):
         except IOError:
             print ("Unable to find file lib/couchbase_helper/"
                        "geospatial/earthquakes.json, data not loaded!")
+
+    def custom_read_from_dump(self,filename="geoshape.json"):
+        count = 0
+        done = False
+        try:
+            import os
+            filepath = os.path.join(".","lib","couchbase_helper","geospatial",filename) 
+            with open(filepath) as f:
+                while not done:
+                    for doc in json.load(f):
+                         #if bool(random.getrandbits(1)):
+                         doc['id'] = str(doc['id'])
+                         doc['type'] = 'earthquake' 
+                         self.gen_docs[count] = doc
+                         if count >= self.end:
+                            f.close()
+                            done = True
+                            break
+                         count += 1
+            f.close()
+        except IOError:
+            print ("Unable to find file lib/couchbase_helper/"
+                       "geospatial/" + filename + ", data not loaded!")
 
     def __next__(self):
         if self.itr >= self.end:
