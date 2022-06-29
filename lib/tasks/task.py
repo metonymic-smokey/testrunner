@@ -1688,7 +1688,7 @@ class ESBulkLoadGeneratorTask(Task):
     """
 
     def __init__(self, es_instance, index_name, generator, op_type="create",
-                 batch=1000, scope=None, collection=None):
+                 batch=1000, dataset=None,scope=None, collection=None):
         Task.__init__(self, "ES_loader_task")
         self.es_instance = es_instance
         self.index_name = index_name
@@ -1699,6 +1699,7 @@ class ESBulkLoadGeneratorTask(Task):
         self.scope = scope
         self.collection = collection
         self.log.info("Starting operation '%s' on Elastic Search ..." % op_type)
+        self.dataset=dataset
 
     def check(self, task_manager):
         self.state = FINISHED
@@ -1714,10 +1715,14 @@ class ESBulkLoadGeneratorTask(Task):
             es_doc = {
                 self.op_type: {
                     "_index": self.index_name,
-                    "_type": doc['type'],
                     "_id": key,
                 }
             }
+            if self.dataset == "geojson":
+                es_doc[self.op_type]["_type"] = "_doc"
+            else:
+                es_doc[self.op_type]["_type"] = doc['type']
+            
             es_bulk_docs.append(json.dumps(es_doc))
             if self.op_type == "create":
                 es_bulk_docs.append(json.dumps(doc))
@@ -1730,7 +1735,7 @@ class ESBulkLoadGeneratorTask(Task):
                 for line in es_bulk_docs:
                     es_file.write("{}\n".format(line).encode())
                 es_file.close()
-                self.es_instance.load_bulk_data(es_filename)
+                self.es_instance.load_bulk_data(es_filename,self.index_name) 
                 loaded += batched
                 self.log.info("{0} documents bulk loaded into ES".format(loaded))
                 self.es_instance.update_index(self.index_name)
@@ -1744,7 +1749,7 @@ class ESBulkLoadGeneratorTask(Task):
 
 class ESRunQueryCompare(Task):
     def __init__(self, fts_index, es_instance, query_index, es_index_name=None, n1ql_executor=None,
-                 use_collections=False):
+                 use_collections=False,dataset=None):
         Task.__init__(self, "Query_runner_task")
         self.fts_index = fts_index
         self.fts_query = fts_index.fts_queries[query_index]
@@ -1759,6 +1764,7 @@ class ESRunQueryCompare(Task):
         self.n1ql_executor = n1ql_executor
         self.score = TestInputSingleton.input.param("score",'')
         self.use_collections = use_collections
+        self.dataset = dataset
 
     def check(self, task_manager):
         self.state = FINISHED
@@ -1814,13 +1820,17 @@ class ESRunQueryCompare(Task):
                 self.passed = False
             es_hits = 0
             if self.es and self.es_query:
-                es_hits, es_doc_ids, es_time = self.run_es_query(self.es_query)
+                es_hits, es_doc_ids, es_time = self.run_es_query(self.es_query,dataset=self.dataset)
                 self.log.info("ES hits for query: %s on %s is %s (took %sms)" % \
                               (json.dumps(self.es_query, ensure_ascii=False),
                                self.es_index_name,
                                es_hits,
                                es_time))
                 if self.passed and self.es_compare:
+                    if type(es_hits) == dict:
+                        es_hits = es_hits['value']
+                        # added since newer versions of ES return results in this format: 
+                        # {'value': 0, 'relation': 'eq'}
                     if int(es_hits) != int(fts_hits):
                         msg = "FAIL: FTS hits: %s, while ES hits: %s" \
                               % (fts_hits, es_hits)
@@ -1925,8 +1935,8 @@ class ESRunQueryCompare(Task):
     def run_fts_query(self, query, score=''):
         return self.fts_index.execute_query(query, score=score)
 
-    def run_es_query(self, query):
-        return self.es.search(index_name=self.es_index_name, query=query)
+    def run_es_query(self, query,dataset=None):
+        return self.es.search(index_name=self.es_index_name, query=query,dataset=dataset)
 
 
 # This will be obsolete with the implementation of batch operations in LoadDocumentsTaks

@@ -568,6 +568,211 @@ class FTSESQueryGenerator(EmployeeQuerables, WikiQuerables):
 
         return fts_query, es_query
 
+    def generate_random_point():
+        lat = -90 + random.random()*180
+        long = -90 + random.random()*180
+        return lat,long
+
+    def generate_random_polygon():
+        vertices = random.randint(4,10)
+        lat_base = random.random() + random.randint(1,10)*6
+        long_base = random.random() + random.randint(1,8)*10
+        sign = -1.0
+        step = 0.95
+        coord = []
+        coord.append([long_base, lat_base])
+        for i in range(1,vertices+1):
+               lat_delta = sign * step
+               lat = coord[i-1][1] + lat_delta + random.randint(1,4)
+               long = long_base + 1.5   
+               coord.append([long, lat])
+               sign *= -1
+        coord.append([long_base, lat_base])
+        coord = [coord]
+        return coord
+
+    def generate_random_linestring():
+        coord = []
+        n = random.randint(2,10)
+        for v in range(1,n+1):
+            lat1,lon1 = FTSESQueryGenerator.generate_random_point() 
+            coord.append([lat1,lon1])
+        return coord
+
+    def generate_random_multipoint():
+        coord = []
+        n = random.randint(4,10)
+        for v in range(1,n+1):
+                lat,lon = FTSESQueryGenerator.generate_random_point() 
+                coord.append([lat,lon])
+        return coord
+    
+    def generate_random_multilinestring():
+        coord = []
+        n = random.randint(4,10)
+        for v in range(1,n+1):
+                line = FTSESQueryGenerator.generate_random_linestring() 
+                coord.append(line) 
+        return coord
+
+    def generate_random_multipolygon():
+         coord = []
+         n = random.randint(4,10)
+         for v in range(1,n+1):
+             coord.append(FTSESQueryGenerator.generate_random_polygon())
+         return coord
+
+    def generate_random_envelope():
+        lat1,lon1 = FTSESQueryGenerator.generate_random_point() 
+        diff = random.random() * random.randint(1,10)
+        lat2 = lat1 + diff
+        lon2 = lon1 - diff
+        coord = [[lat1,lon1],[lat2,lon2]]
+        return coord
+
+    def generate_random_circle():
+        lat,lon = FTSESQueryGenerator.generate_random_point() 
+        coord = [lat,lon]
+        distance_units = ["m","km","mi"] 
+        radius = str(random.randint(500,20000)) + random.choice(distance_units)
+        return coord,radius
+
+    def construct_geo_shape_queries_helper(num_queries,shape,relation,compare_es,fts_queries,es_queries):
+        for i in range (0,num_queries):
+            fts_query,es_query = FTSESQueryGenerator.construct_geo_shape_query(shape=shape,relation=relation)
+            fts_queries.append(fts_query)
+            if compare_es:
+                es_queries.append(es_query)
+            
+            return fts_queries,es_queries
+    
+    @staticmethod
+    def construct_geo_shape_queries(shape="",num_queries=9,compare_es=True):
+       num_queries_per_shape = num_queries
+       if shape == "":
+            shapes = ['point','linestring','polygon','multipoint','multilinestring','multipolygon','circle',
+        'envelope','geometrycollection']
+            shape = random.choice(shapes)
+            num_queries_per_shape = num_queries_per_shape//len(shapes)
+
+       es_queries = []
+       fts_queries = []
+
+       if shape == 'linestring' or shape == 'multilinestring':
+            relations = ['intersects','contains']
+            num_queries_per_relation = max(num_queries_per_shape//len(relations),1)
+            for relation in relations:
+                   FTSESQueryGenerator.construct_geo_shape_queries_helper(num_queries=num_queries_per_relation,shape=shape,\
+                    relation=relation,compare_es=compare_es,fts_queries=fts_queries,es_queries=es_queries) 
+
+       else: 
+            relations = ['intersects','within','contains']
+            num_queries_per_relation = max(1,num_queries_per_shape//len(relations))
+            for relation in relations:
+                print("\n\n relation: ",relation)
+                FTSESQueryGenerator.construct_geo_shape_queries_helper(num_queries=num_queries_per_relation,shape=shape,\
+                    relation=relation,compare_es=compare_es,fts_queries=fts_queries,es_queries=es_queries) 
+
+       return fts_queries,es_queries
+
+    @staticmethod
+    def construct_geo_shape_query(shape="",relation = "intersects"):    
+        fts_query = dict()
+        es_query = dict()
+        coord = []
+        coll_shapes = []
+        shapes = ['point','linestring','polygon','multipoint','multilinestring','multipolygon','circle',
+        'envelope','geometrycollection']
+
+        if shape == 'point':
+            lat,lon = FTSESQueryGenerator.generate_random_point() 
+            coord = [lat,lon]
+        
+        if shape == 'multipoint':
+            coord = FTSESQueryGenerator.generate_random_multipoint()
+
+        elif shape == 'linestring':
+            coord = FTSESQueryGenerator.generate_random_linestring()
+
+        elif shape == 'multilinestring':
+            coord = FTSESQueryGenerator.generate_random_multilinestring()
+
+        elif shape == 'polygon':
+           coord = FTSESQueryGenerator.generate_random_polygon()
+
+        elif shape == 'multipolygon':
+           coord = FTSESQueryGenerator.generate_random_multipolygon() 
+
+        elif shape == "envelope":
+           coord = FTSESQueryGenerator.generate_random_envelope() 
+
+        elif shape == "circle":
+            coord,radius = FTSESQueryGenerator.generate_random_circle() 
+
+        elif shape == "geometrycollection":
+            contains_linestring = False
+            n = random.randint(1,10)
+            for i in range(n):
+                coll_shape = random.choice(shapes[:-1])
+                temp = dict()
+                temp['type'] = coll_shape
+                if (coll_shape == "linestring" or coll_shape == "multilinestring"):
+                   contains_linestring = True 
+                if coll_shape == "point":
+                    lat,lon = FTSESQueryGenerator.generate_random_point() 
+                    point_coord = [lat,lon]
+                    temp['coordinates'] = point_coord
+                if coll_shape == "multipoint":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_multipoint()
+                if coll_shape == "linestring":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_linestring()
+                if coll_shape == "multilinestring":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_multilinestring()
+                if coll_shape == "polygon":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_polygon()
+                if coll_shape == "multipolygon":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_multipolygon()
+                if coll_shape == "circle":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_circle()
+                if coll_shape == "envelope":
+                    temp['coordinates'] = FTSESQueryGenerator.generate_random_envelope()
+                coll_shapes.append(temp)
+
+        shape_dict = dict()
+        shape_dict = {
+                    "type": shape
+        }
+        if shape != "geometrycollection":
+                shape_dict["coordinates"] = coord
+        else:
+                shape_dict["geometries"] = coll_shapes
+        if shape == "circle":
+                shape_dict["radius"] = radius
+
+        fts_query =  {'field': 'location','geometry': {'shape': shape_dict,'relation': relation}}
+
+        es_query = {
+                "from": 0,
+                "size": 10000, #default limit
+                "query": {
+                    "bool": {
+                        "must": {
+                            "match_all": {},
+                        },
+                        "filter": {
+                        "geo_shape": {
+                            "location": {
+                                "shape": shape_dict,
+                                "relation": relation 
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+        return fts_query,es_query
+
     @staticmethod
     def construct_geo_location_query(lon=None, lat=None,
                                      distance=None, dist_unit=None):
